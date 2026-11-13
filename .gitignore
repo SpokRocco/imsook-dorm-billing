@@ -1,0 +1,21 @@
+# Dependencies & build artifacts
+node_modules/
+dist/
+.vercel/
+
+# Environment variables & secrets (NEVER commit real keys)
+.env
+.env.local
+.env.*.local
+*.local
+
+# Local reference documents & temporary Office files
+extracted_media/
+*.xlsx
+*.docx
+*.pdf
+~$*
+
+# OS & logs
+.DS_Store
+*.log
