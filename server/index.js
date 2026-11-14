@@ -8,7 +8,39 @@ import { buildBillFormulaDetails, runBillAuditSubAgent } from './billAuditAgent.
 dotenv.config();
 
 const app = express();
-app.use(cors());
+
+const DEFAULT_ALLOWED_ORIGINS = [
+  'capacitor://localhost',
+  'ionic://localhost',
+  'http://localhost',
+  'https://localhost',
+  'http://localhost:5180',
+  'http://127.0.0.1:5180'
+];
+const envAllowedOrigins = (process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
+
+app.use(
+  cors({
+    origin(origin, callback) {
+      // Allow server-to-server / curl / mobile native requests without Origin header
+      if (!origin) return callback(null, true);
+      if (
+        DEFAULT_ALLOWED_ORIGINS.includes(origin) ||
+        envAllowedOrigins.includes(origin) ||
+        /^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(origin)
+      ) {
+        return callback(null, true);
+      }
+      return callback(null, true);
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+  })
+);
 app.use(express.json({ limit: '15mb' }));
 
 const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;

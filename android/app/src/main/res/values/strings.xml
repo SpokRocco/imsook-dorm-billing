@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">หอพักอิ่มสุข</string>
+    <string name="title_activity_main">หอพักอิ่มสุข</string>
+    <string name="package_name">com.imsook.dormbilling</string>
+    <string name="custom_url_scheme">com.imsook.dormbilling</string>
+</resources>

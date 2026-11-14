@@ -9,9 +9,15 @@
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "build": "vite build",
     "start": "node server/index.js",
-    "seed": "node server/seed.js"
+    "seed": "node server/seed.js",
+    "cap:sync": "npm run build && npx cap sync",
+    "cap:android": "npx cap open android",
+    "cap:ios": "npx cap open ios"
   },
   "dependencies": {
+    "@capacitor/android": "^8.6.2",
+    "@capacitor/core": "^8.6.2",
+    "@capacitor/ios": "^8.6.2",
     "@supabase/supabase-js": "^2.119.0",
     "cors": "^2.8.6",
     "dotenv": "^18.0.10",
@@ -25,6 +31,7 @@
     "vue": "^3.5.45"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.6.2",
     "@tailwindcss/vite": "^4.3.5",
     "@vitejs/plugin-react": "^6.3.0",
     "@vitejs/plugin-vue": "^6.0.10",

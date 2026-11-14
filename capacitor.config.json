@@ -1,0 +1,10 @@
+{
+  "appId": "com.imsook.dormbilling",
+  "appName": "หอพักอิ่มสุข",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https",
+    "iosScheme": "capacitor"
+  }
+}
