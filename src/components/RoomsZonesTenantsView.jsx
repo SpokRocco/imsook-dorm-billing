@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
-  MapPin, Building2, Users, Plus, Edit3, Trash2, ArrowRightLeft, FileImage, Phone, X, Check
+  MapPin, Building2, Users, Plus, Edit3, Trash2, ArrowRightLeft, FileImage, Phone, X, Check, Search, History, DoorOpen, FileText
 } from 'lucide-react';
 import { formatCurrency } from '../utils/bahtText.js';
 
@@ -37,7 +37,52 @@ export default function RoomsZonesTenantsView({
   const [transferModal, setTransferModal] = useState(null);
   const [lightboxImg, setLightboxImg] = useState(null);
 
+  // Tenant-Centric Full-Name Search & Complete History
+  const [tenantSearchQuery, setTenantSearchQuery] = useState('');
+  const [tenantHistoryResults, setTenantHistoryResults] = useState([]);
+  const [searchingHistory, setSearchingHistory] = useState(false);
+  const [expandedHistoryKey, setExpandedHistoryKey] = useState(null);
+
   const findTenantObj = (id) => tenants.find((t) => t.id === id);
+
+  const fetchTenantHistoryByName = useCallback(async (q = '') => {
+    setSearchingHistory(true);
+    try {
+      const res = await fetch(`/api/tenants/search-history?q=${encodeURIComponent(q.trim())}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'ค้นหาประวัติผู้เช่าไม่สำเร็จ');
+      setTenantHistoryResults(data.results || []);
+    } catch (err) {
+      if (showToast) showToast(err.message, 'error');
+    } finally {
+      setSearchingHistory(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (subTab !== 'tenants') return;
+    const timer = setTimeout(() => {
+      fetchTenantHistoryByName(tenantSearchQuery);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [subTab, tenantSearchQuery, fetchTenantHistoryByName]);
+
+  const quickUpdateRoomStatus = async (room, nextStatus) => {
+    try {
+      const res = await fetch(`/api/rooms/${room.id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: nextStatus, check_out_active_tenant: false })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'อัปเดตสถานะห้องไม่สำเร็จ');
+      const label = nextStatus === 'vacant' ? 'ห้องว่าง' : nextStatus === 'maintenance' ? 'ซ่อมบำรุง' : 'มีผู้เช่า';
+      if (showToast) showToast(`เปลี่ยนสถานะห้อง ${room.room_number} เป็น "${label}" แล้ว (คงประวัติผู้เช่าเดิมไว้)`);
+      if (onRefreshAll) onRefreshAll();
+    } catch (err) {
+      if (showToast) showToast(err.message, 'error');
+    }
+  };
 
   // --- ZONE HANDLERS ---
   const openNewZone = () => {
@@ -408,6 +453,7 @@ export default function RoomsZonesTenantsView({
                   <tr className="bg-slate-900 text-white uppercase">
                     <th className="p-3">ห้อง</th>
                     <th className="p-3">โซน</th>
+                    <th className="p-3">สถานะห้อง</th>
                     <th className="p-3">ผู้เช่าปัจจุบัน</th>
                     <th className="p-3 text-right">ค่าเช่า/เดือน</th>
                     <th className="p-3">ค่าน้ำ</th>
@@ -421,6 +467,23 @@ export default function RoomsZonesTenantsView({
                     <tr key={rm.id} className="hover:bg-slate-50">
                       <td className="p-3 font-extrabold text-slate-900 text-sm">{rm.room_number}</td>
                       <td className="p-3 font-semibold text-slate-600">{rm.zone}</td>
+                      <td className="p-3">
+                        <select
+                          value={rm.status === 'available' ? 'vacant' : (rm.status || 'occupied')}
+                          onChange={(e) => quickUpdateRoomStatus(rm, e.target.value)}
+                          className={`px-2.5 py-1 rounded-xl text-[11px] font-extrabold border cursor-pointer ${
+                            rm.status === 'vacant' || rm.status === 'available'
+                              ? 'bg-cyan-50 text-cyan-800 border-cyan-300'
+                              : rm.status === 'maintenance'
+                                ? 'bg-amber-50 text-amber-800 border-amber-300'
+                                : 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                          }`}
+                        >
+                          <option value="occupied">มีผู้เช่า</option>
+                          <option value="vacant">ห้องว่าง</option>
+                          <option value="maintenance">ซ่อมบำรุง</option>
+                        </select>
+                      </td>
                       <td className="p-3">
                         <div className="font-bold text-emerald-700">{rm.active_tenant?.name || 'ว่าง'}</div>
                         {rm.active_tenant?.phone && <div className="text-[11px] text-slate-400">{rm.active_tenant.phone}</div>}
@@ -489,7 +552,187 @@ export default function RoomsZonesTenantsView({
 
       {/* SUB-TAB 3: TENANTS & DOCS & TRANSFER TIMELINE */}
       {subTab === 'tenants' && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="space-y-4">
+          {/* Dedicated Tenant Full-Name Search & Complete History Function */}
+          <div className="bg-gradient-to-br from-indigo-50 via-sky-50 to-white rounded-3xl p-4 sm:p-5 border-2 border-indigo-200 shadow-xs space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h3 className="text-base font-extrabold text-indigo-950 flex items-center gap-2">
+                  <History className="w-5 h-5 text-indigo-600" />
+                  <span>ค้นหาประวัติผู้เช่าตามชื่อและนามสกุล (ย้ายห้อง / เช่าห้อง / บิล / เอกสาร)</span>
+                </h3>
+                <p className="text-xs text-slate-600 mt-0.5">
+                  อ้างอิงจากชื่อ-นามสกุลผู้เช่าเป็นหลัก — แสดงประวัติการย้ายห้อง ประวัติการเข้าพัก เอกสาร และบิลทั้งหมดแม้เปลี่ยนห้องหรือกำหนดห้องว่างแล้ว
+                </p>
+              </div>
+              <span className="text-xs font-extrabold px-3 py-1 rounded-full bg-indigo-600 text-white self-start sm:self-auto">
+                พบ {tenantHistoryResults.length} รายชื่อ
+              </span>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-2">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-indigo-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  value={tenantSearchQuery}
+                  onChange={(e) => setTenantSearchQuery(e.target.value)}
+                  placeholder="พิมพ์ชื่อ หรือ นามสกุล ผู้เช่า เช่น สมชาย ใจดี, โปเต้..."
+                  className="w-full pl-10 pr-9 py-2.5 rounded-2xl border-2 border-indigo-200 bg-white text-sm font-semibold text-slate-900 focus:outline-none focus:border-indigo-500"
+                />
+                {tenantSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setTenantSearchQuery('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 cursor-pointer"
+                    aria-label="ล้างคำค้นหา"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => fetchTenantHistoryByName(tenantSearchQuery)}
+                disabled={searchingHistory}
+                className="px-4 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-extrabold shadow-sm cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <Search className="w-4 h-4" />
+                <span>{searchingHistory ? 'กำลังค้นหา...' : 'ค้นหาประวัติผู้เช่า'}</span>
+              </button>
+            </div>
+
+            {/* Unified Tenant-Centric History Results */}
+            {tenantHistoryResults.length > 0 && (
+              <div className="space-y-2.5 pt-1">
+                {tenantHistoryResults.slice(0, tenantSearchQuery.trim() ? 30 : 6).map((person) => {
+                  const key = person.tenant_name;
+                  const isExpanded = expandedHistoryKey === key || Boolean(tenantSearchQuery.trim());
+                  const pt = person.primary_tenant;
+                  return (
+                    <div key={key} className="bg-white rounded-2xl border border-indigo-100 p-3.5 shadow-xs space-y-2.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm sm:text-base font-extrabold text-slate-900">{person.tenant_name}</span>
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                            person.summary.is_active ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-700'
+                          }`}>
+                            {person.summary.is_active ? `กำลังพักห้อง ${person.summary.current_room}` : 'ย้ายออก / อดีตผู้เช่า'}
+                          </span>
+                          {person.summary.transfer_count > 0 && (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-indigo-100 text-indigo-800">
+                              ย้ายห้อง {person.summary.transfer_count} ครั้ง
+                            </span>
+                          )}
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-100 text-sky-800">
+                            บิล {person.summary.invoice_count} ใบ (฿{formatCurrency(person.summary.total_paid)})
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          {pt?.id_card_image_url && (
+                            <button
+                              type="button"
+                              onClick={() => setLightboxImg({ url: pt.id_card_image_url, title: `บัตรประชาชน — ${person.tenant_name}` })}
+                              className="px-2.5 py-1 rounded-xl bg-emerald-50 border border-emerald-200 text-[11px] font-bold text-emerald-800 cursor-pointer"
+                            >
+                              บัตร ปชช.
+                            </button>
+                          )}
+                          {pt?.house_reg_image_url && (
+                            <button
+                              type="button"
+                              onClick={() => setLightboxImg({ url: pt.house_reg_image_url, title: `ทะเบียนบ้าน — ${person.tenant_name}` })}
+                              className="px-2.5 py-1 rounded-xl bg-sky-50 border border-sky-200 text-[11px] font-bold text-sky-800 cursor-pointer"
+                            >
+                              ทะเบียนบ้าน
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => setExpandedHistoryKey(isExpanded && !tenantSearchQuery.trim() ? null : key)}
+                            className="px-2.5 py-1 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[11px] font-extrabold cursor-pointer"
+                          >
+                            {isExpanded ? 'ซ่อนรายละเอียด' : 'ดูประวัติทั้งหมด'}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="text-[11px] text-slate-600 flex flex-wrap gap-3">
+                        <span>ห้องที่เคยเช่า: <strong>{person.summary.rooms_stayed.join(', ') || '-'}</strong></span>
+                        {pt?.phone && <span>โทร: <strong>{pt.phone}</strong></span>}
+                        {pt?.id_card && <span>เลข ปชช.: <strong>{pt.id_card}</strong></span>}
+                        {pt?.home_address && <span>ที่อยู่: {pt.home_address}</span>}
+                      </div>
+
+                      {isExpanded && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2 border-t border-slate-100 text-[11px]">
+                          <div className="bg-slate-50 rounded-xl p-2.5 space-y-1.5">
+                            <div className="font-extrabold text-slate-800 flex items-center gap-1">
+                              <ArrowRightLeft className="w-3.5 h-3.5 text-indigo-600" />
+                              <span>ประวัติการเข้าพัก / ย้ายห้อง / เหตุการณ์ ({person.stays.length + person.history_logs.length})</span>
+                            </div>
+                            {person.stays.length === 0 && person.history_logs.length === 0 ? (
+                              <div className="text-slate-400">ยังไม่มีประวัติการย้ายห้องหรือเหตุการณ์เพิ่มเติม</div>
+                            ) : (
+                              <div className="space-y-1 max-h-44 overflow-y-auto pr-1">
+                                {person.stays.map((st) => (
+                                  <div key={st.id} className="bg-white rounded-lg px-2 py-1 border border-slate-200 flex items-center justify-between gap-2">
+                                    <span className="font-semibold text-slate-700">
+                                      {st.event_type === 'room_transfer'
+                                        ? `ย้ายจากห้อง ${st.previous_room_number || '-'} → ห้อง ${st.room_number}`
+                                        : st.event_type === 'move_out'
+                                          ? `ย้ายออกจากห้อง ${st.room_number}`
+                                          : `เข้าพักห้อง ${st.room_number}`}
+                                      {st.notes ? ` (${st.notes})` : ''}
+                                    </span>
+                                    <span className="text-slate-400 shrink-0">{st.start_date || ''}</span>
+                                  </div>
+                                ))}
+                                {person.history_logs.map((lg) => (
+                                  <div key={lg.id} className="bg-white rounded-lg px-2 py-1 border border-indigo-100 flex items-center justify-between gap-2">
+                                    <span className="text-slate-700">{lg.description}</span>
+                                    <span className="text-slate-400 shrink-0">{String(lg.created_at || '').slice(0, 10)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="bg-emerald-50/50 rounded-xl p-2.5 space-y-1.5">
+                            <div className="font-extrabold text-emerald-900 flex items-center gap-1">
+                              <FileText className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>ประวัติบิลค่าเช่า ({person.invoices.length} รายการ)</span>
+                            </div>
+                            {person.invoices.length === 0 ? (
+                              <div className="text-slate-400">ยังไม่มีบิลค่าเช่า</div>
+                            ) : (
+                              <div className="space-y-1 max-h-44 overflow-y-auto pr-1">
+                                {person.invoices.map((inv) => (
+                                  <div key={inv.id} className="bg-white rounded-lg px-2 py-1 border border-emerald-100 flex items-center justify-between gap-2">
+                                    <span className="font-semibold text-slate-700">
+                                      ห้อง {inv.room_number} • {inv.billing_month} {inv.billing_year_be}
+                                    </span>
+                                    <span className="font-extrabold text-emerald-700 shrink-0">฿{formatCurrency(inv.total_amount)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                {!tenantSearchQuery.trim() && tenantHistoryResults.length > 6 && (
+                  <div className="text-center text-[11px] font-bold text-indigo-700">
+                    พิมพ์ชื่อหรือนามสกุลในช่องค้นหาด้านบนเพื่อดูประวัติรายบุคคลจากทั้งหมด {tenantHistoryResults.length} รายชื่อ
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {tenants.map((t) => (
             <div key={t.id} className="bg-white rounded-3xl p-4 sm:p-5 border border-slate-200 shadow-xs space-y-3">
               <div className="flex items-start justify-between gap-2">
@@ -574,6 +817,7 @@ export default function RoomsZonesTenantsView({
               )}
             </div>
           ))}
+          </div>
         </div>
       )}
 
@@ -742,6 +986,18 @@ export default function RoomsZonesTenantsView({
                   onChange={(e) => setRoomModal({ ...roomModal, tenant_name: e.target.value })}
                   className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm"
                 />
+              </div>
+              <div>
+                <label className="font-bold text-slate-700 block mb-1">สถานะห้องพัก</label>
+                <select
+                  value={roomModal.status === 'available' ? 'vacant' : (roomModal.status || 'occupied')}
+                  onChange={(e) => setRoomModal({ ...roomModal, status: e.target.value })}
+                  className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm bg-white font-bold"
+                >
+                  <option value="occupied">มีผู้เช่า</option>
+                  <option value="vacant">ห้องว่าง</option>
+                  <option value="maintenance">ซ่อมบำรุง</option>
+                </select>
               </div>
             </div>
             <div className="flex justify-end gap-2 pt-2">

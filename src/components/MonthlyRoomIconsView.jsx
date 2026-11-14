@@ -165,7 +165,8 @@ export default function MonthlyRoomIconsView({
     return allItems.filter((item) => {
       if (zoneFilter && item.zone !== zoneFilter) return false;
       if (statusFilter === 'recorded' && !item.is_recorded) return false;
-      if (statusFilter === 'unrecorded' && item.is_recorded) return false;
+      if (statusFilter === 'unrecorded' && (item.is_recorded || item.is_vacant)) return false;
+      if (statusFilter === 'vacant' && !item.is_vacant) return false;
       if (searchQuery.trim()) {
         const q = searchQuery.trim().toLowerCase();
         const matchRoom = (item.room_number || '').toLowerCase().includes(q);
@@ -205,6 +206,8 @@ export default function MonthlyRoomIconsView({
     const otherNum = Number(item.other_amount || 0);
     const prepared = computeRoomDraft({
       ...item,
+      occupancy_status: item.occupancy_status || (item.is_vacant ? 'vacant' : 'occupied'),
+      also_update_room_status: false,
       other_sign: otherNum < 0 ? '-' : '+',
       other_abs: Math.abs(otherNum),
       water_custom_override: item.water_calc_type === 'flat'
@@ -212,6 +215,23 @@ export default function MonthlyRoomIconsView({
     setActiveRoomDraft(prepared);
     setRetroactiveMode(Boolean(item.edit_count > 0 && item.is_recorded));
     setCorrectionReason(item.admin_correction_reason || 'แก้ไขตัวเลขมิเตอร์ที่จดคลาดเคลื่อน (Human Error)');
+  };
+
+  const setDraftOccupancyStatus = (nextOccStatus) => {
+    setActiveRoomDraft((prev) => {
+      if (!prev) return prev;
+      const isVac = nextOccStatus === 'vacant';
+      const next = {
+        ...prev,
+        occupancy_status: nextOccStatus,
+        is_vacant: isVac,
+        room_rate: isVac ? 0 : (Number(prev.room_rate) > 0 ? prev.room_rate : (prev.prev_snapshot?.room_rate || 2500)),
+        water_total: isVac && prev.water_calc_type !== 'meter' ? 0 : prev.water_total,
+        tenant_name: isVac ? '' : (prev.tenant_name || prev.prev_snapshot?.tenant_name || ''),
+        note_status: isVac ? 'vacant' : 'pending'
+      };
+      return computeRoomDraft(next);
+    });
   };
 
   const updateDraftField = (field, value) => {
@@ -236,7 +256,8 @@ export default function MonthlyRoomIconsView({
         ...activeRoomDraft,
         billing_month: billingMonth,
         billing_year_be: billingYearBe,
-        sync_to_invoice: true,
+        sync_to_invoice: activeRoomDraft.occupancy_status !== 'vacant',
+        also_update_room_status: Boolean(activeRoomDraft.also_update_room_status),
         is_retroactive_correction: retroactiveMode,
         admin_correction_reason: retroactiveMode ? correctionReason : ''
       };
@@ -449,6 +470,13 @@ export default function MonthlyRoomIconsView({
                 </span>
                 <strong className="text-orange-600 font-black">{unrecordedCountNum} ห้อง</strong>
               </div>
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-1.5 font-bold text-slate-600">
+                  <span className="w-2.5 h-2.5 rounded-full bg-cyan-500" />
+                  ห้องว่างเดือนนี้
+                </span>
+                <strong className="text-cyan-700 font-black">{summary.vacant_count || 0} ห้อง</strong>
+              </div>
               <div className="pt-1.5 border-t border-blue-200/60 flex items-center justify-between">
                 <span className="font-bold text-slate-500">ยอดที่บันทึกแล้ว</span>
                 <strong className="text-emerald-600 font-black text-sm">
@@ -463,10 +491,10 @@ export default function MonthlyRoomIconsView({
           </div>
 
           {/* Right: Interactive Colorful Public Status Buttons */}
-          <div className="lg:col-span-7 grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+          <div className="lg:col-span-7 grid grid-cols-2 sm:grid-cols-4 gap-2.5">
             <button
               onClick={() => setStatusFilter('all')}
-              className={`py-3 px-4 rounded-2xl border-2 text-left transition cursor-pointer ${
+              className={`py-3 px-3.5 rounded-2xl border-2 text-left transition cursor-pointer ${
                 statusFilter === 'all'
                   ? 'bg-gradient-to-br from-[#0066EE] to-indigo-600 text-white border-[#0066EE] shadow-lg shadow-blue-500/25'
                   : 'bg-blue-50/70 text-slate-800 border-blue-200 hover:bg-blue-100/70'
@@ -475,17 +503,17 @@ export default function MonthlyRoomIconsView({
               <div className={`text-[11px] font-bold ${statusFilter === 'all' ? 'text-blue-100' : 'text-blue-700'}`}>
                 ภาพรวมทั้งหมด
               </div>
-              <div className="text-lg font-black flex items-center justify-between mt-1">
+              <div className="text-base sm:text-lg font-black flex items-center justify-between mt-1">
                 <span>ทั้งหมด</span>
-                <span className={`px-2.5 py-0.5 rounded-full text-xs ${statusFilter === 'all' ? 'bg-white/20 text-white' : 'bg-white text-[#0066EE]'}`}>
-                  {summary.total_rooms || 0} ห้อง
+                <span className={`px-2 py-0.5 rounded-full text-xs ${statusFilter === 'all' ? 'bg-white/20 text-white' : 'bg-white text-[#0066EE]'}`}>
+                  {summary.total_rooms || 0}
                 </span>
               </div>
             </button>
 
             <button
               onClick={() => setStatusFilter('recorded')}
-              className={`py-3 px-4 rounded-2xl border-2 text-left transition cursor-pointer ${
+              className={`py-3 px-3.5 rounded-2xl border-2 text-left transition cursor-pointer ${
                 statusFilter === 'recorded'
                   ? 'bg-gradient-to-br from-emerald-500 to-teal-600 text-white border-emerald-500 shadow-lg shadow-emerald-500/25'
                   : 'bg-emerald-50/80 text-emerald-900 border-emerald-200 hover:bg-emerald-100/80'
@@ -495,14 +523,14 @@ export default function MonthlyRoomIconsView({
                 <CheckCircle2 className="w-3.5 h-3.5" />
                 <span>บันทึกแล้ว</span>
               </div>
-              <div className="text-lg font-black mt-1">
+              <div className="text-base sm:text-lg font-black mt-1">
                 {recordedCountNum} ห้อง
               </div>
             </button>
 
             <button
               onClick={() => setStatusFilter('unrecorded')}
-              className={`py-3 px-4 rounded-2xl border-2 text-left transition cursor-pointer ${
+              className={`py-3 px-3.5 rounded-2xl border-2 text-left transition cursor-pointer ${
                 statusFilter === 'unrecorded'
                   ? 'bg-gradient-to-br from-amber-500 to-rose-500 text-white border-orange-500 shadow-lg shadow-orange-500/25'
                   : 'bg-amber-50/80 text-amber-900 border-amber-200 hover:bg-amber-100/80'
@@ -510,10 +538,27 @@ export default function MonthlyRoomIconsView({
             >
               <div className={`text-[11px] font-bold flex items-center gap-1 ${statusFilter === 'unrecorded' ? 'text-amber-50' : 'text-orange-700'}`}>
                 <Clock className="w-3.5 h-3.5" />
-                <span>ยังไม่ได้บันทึก</span>
+                <span>รอจดบิล</span>
               </div>
-              <div className="text-lg font-black mt-1">
+              <div className="text-base sm:text-lg font-black mt-1">
                 {unrecordedCountNum} ห้อง
+              </div>
+            </button>
+
+            <button
+              onClick={() => setStatusFilter('vacant')}
+              className={`py-3 px-3.5 rounded-2xl border-2 text-left transition cursor-pointer ${
+                statusFilter === 'vacant'
+                  ? 'bg-gradient-to-br from-cyan-500 to-sky-600 text-white border-cyan-500 shadow-lg shadow-cyan-500/25'
+                  : 'bg-cyan-50/80 text-cyan-900 border-cyan-200 hover:bg-cyan-100/80'
+              }`}
+            >
+              <div className={`text-[11px] font-bold flex items-center gap-1 ${statusFilter === 'vacant' ? 'text-cyan-50' : 'text-cyan-700'}`}>
+                <DoorOpen className="w-3.5 h-3.5" />
+                <span>ห้องว่าง</span>
+              </div>
+              <div className="text-base sm:text-lg font-black mt-1">
+                {summary.vacant_count || 0} ห้อง
               </div>
             </button>
           </div>
@@ -650,6 +695,7 @@ export default function MonthlyRoomIconsView({
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3.5">
                   {items.map((room) => {
                     const isRec = Boolean(room.is_recorded);
+                    const isVacant = Boolean(room.is_vacant || room.occupancy_status === 'vacant');
                     const hasAnomaly =
                       room.electric_curr !== '' &&
                       ((parseFloat(room.electric_curr) < parseFloat(room.electric_prev)) ||
@@ -660,17 +706,21 @@ export default function MonthlyRoomIconsView({
                         key={room.room_number}
                         onClick={() => openRoomPopup(room)}
                         className={`group text-left rounded-3xl bg-white border-2 transition-all duration-200 cursor-pointer flex flex-col justify-between min-h-[164px] relative overflow-hidden active:scale-[0.98] shadow-[0_6px_20px_-8px_rgba(37,99,235,0.14)] hover:shadow-xl hover:-translate-y-1 ${
-                          isRec
-                            ? 'border-emerald-300 hover:border-emerald-500'
-                            : 'border-amber-300/90 hover:border-[#0066EE]'
+                          isVacant
+                            ? 'border-cyan-300 hover:border-cyan-500 bg-cyan-50/20'
+                            : isRec
+                              ? 'border-emerald-300 hover:border-emerald-500'
+                              : 'border-amber-300/90 hover:border-[#0066EE]'
                         }`}
                       >
                         {/* Colorful Top Accent Strip */}
                         <div
                           className={`h-2 w-full ${
-                            isRec
-                              ? 'bg-gradient-to-r from-emerald-400 via-teal-500 to-cyan-500'
-                              : 'bg-gradient-to-r from-amber-400 via-orange-500 to-rose-500'
+                            isVacant
+                              ? 'bg-gradient-to-r from-cyan-400 via-sky-500 to-blue-500'
+                              : isRec
+                                ? 'bg-gradient-to-r from-emerald-400 via-teal-500 to-cyan-500'
+                                : 'bg-gradient-to-r from-amber-400 via-orange-500 to-rose-500'
                           }`}
                         />
 
@@ -679,9 +729,11 @@ export default function MonthlyRoomIconsView({
                           <div className="flex items-start justify-between gap-1.5">
                             <div
                               className={`w-11 h-11 rounded-2xl flex items-center justify-center shadow-sm transition-transform group-hover:scale-105 text-white ${
-                                isRec
-                                  ? 'bg-gradient-to-br from-emerald-500 to-teal-600'
-                                  : 'bg-gradient-to-br from-amber-500 to-rose-500'
+                                isVacant
+                                  ? 'bg-gradient-to-br from-cyan-500 to-sky-600'
+                                  : isRec
+                                    ? 'bg-gradient-to-br from-emerald-500 to-teal-600'
+                                    : 'bg-gradient-to-br from-amber-500 to-rose-500'
                               }`}
                             >
                               {isRec ? <Home className="w-5 h-5" /> : <DoorOpen className="w-5 h-5" />}
@@ -690,12 +742,19 @@ export default function MonthlyRoomIconsView({
                             <div className="flex flex-col items-end gap-1">
                               <span
                                 className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold ${
-                                  isRec
-                                    ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                                    : 'bg-orange-100 text-orange-800 border border-orange-200'
+                                  isVacant
+                                    ? 'bg-cyan-100 text-cyan-800 border border-cyan-300'
+                                    : isRec
+                                      ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                      : 'bg-orange-100 text-orange-800 border border-orange-200'
                                 }`}
                               >
-                                {isRec ? (
+                                {isVacant ? (
+                                  <>
+                                    <DoorOpen className="w-3 h-3" />
+                                    <span>ห้องว่าง</span>
+                                  </>
+                                ) : isRec ? (
                                   <>
                                     <CheckCircle2 className="w-3 h-3" />
                                     <span>บันทึกแล้ว</span>
@@ -884,6 +943,51 @@ export default function MonthlyRoomIconsView({
                       </div>
                     )}
                   </>
+                )}
+              </div>
+
+              {/* ROOM STATUS & FREE MONTHLY CONFIGURATION BAR (ก่อนออกบิล) */}
+              <div className="rounded-2xl border-2 border-cyan-200 bg-gradient-to-r from-cyan-50 via-sky-50 to-indigo-50 p-3.5 space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-xs font-extrabold text-slate-800">
+                    สถานะห้องพักในเดือน {billingMonth} {billingYearBe} (กำหนดอิสระก่อนออกบิล)
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {[
+                      { id: 'occupied', label: 'มีผู้เช่า', active: 'bg-emerald-600 text-white border-emerald-600' },
+                      { id: 'vacant', label: 'ห้องว่าง (0 บ.)', active: 'bg-cyan-600 text-white border-cyan-600' },
+                      { id: 'maintenance', label: 'ซ่อมบำรุง', active: 'bg-amber-600 text-white border-amber-600' }
+                    ].map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => setDraftOccupancyStatus(opt.id)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-extrabold border cursor-pointer transition ${
+                          (activeRoomDraft.occupancy_status || 'occupied') === opt.id
+                            ? `${opt.active} shadow-sm`
+                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <label className="flex items-center gap-2 text-[11px] font-bold text-slate-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(activeRoomDraft.also_update_room_status)}
+                    onChange={(e) => updateDraftField('also_update_room_status', e.target.checked)}
+                    className="w-4 h-4 accent-cyan-600 rounded"
+                  />
+                  <span>อัปเดตสถานะหลักของห้อง {activeRoomDraft.room_number} ด้วย (ยังคงประวัติผู้เช่าเดิมในห้องไว้ครบถ้วน)</span>
+                </label>
+
+                {activeRoomDraft.occupancy_status === 'vacant' && (
+                  <div className="text-[11px] font-bold text-cyan-900 bg-white/85 px-3 py-1.5 rounded-xl border border-cyan-200">
+                    ✓ กำหนดเป็น <strong>ห้องว่าง</strong> สำหรับเดือนนี้แล้ว — ค่าห้องตั้งต้นเป็น 0 บาท และจะไม่ออกบิลอัตโนมัติ (สามารถแก้ไขค่าได้อิสระ)
+                  </div>
                 )}
               </div>
 

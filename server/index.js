@@ -477,6 +477,70 @@ app.put('/api/rooms/:id', async (req, res) => {
   res.json(room);
 });
 
+// Quick Room Status Toggle (occupied | vacant | maintenance) - preserves all rental history
+app.patch('/api/rooms/:id/status', async (req, res) => {
+  const { id } = req.params;
+  const rawStatus = String(req.body.status || 'vacant').toLowerCase();
+  const normalizedStatus = rawStatus === 'available' ? 'vacant' : rawStatus;
+  if (!['occupied', 'vacant', 'maintenance'].includes(normalizedStatus)) {
+    return res.status(400).json({ error: 'สถานะห้องต้องเป็น occupied, vacant หรือ maintenance' });
+  }
+
+  const { data: existingRoom, error: fetchErr } = await supabase.from('rooms').select('*').eq('id', id).maybeSingle();
+  if (fetchErr || !existingRoom) return res.status(404).json({ error: 'ไม่พบห้องพักนี้' });
+
+  const { data: updatedRoom, error: updErr } = await supabase
+    .from('rooms')
+    .update({ status: normalizedStatus, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select()
+    .single();
+  if (updErr) return res.status(500).json({ error: updErr.message });
+
+  const { data: activeTenant } = await supabase
+    .from('tenants')
+    .select('*')
+    .eq('room_id', id)
+    .eq('is_active', true)
+    .maybeSingle();
+
+  if (normalizedStatus === 'vacant' && req.body.check_out_active_tenant && activeTenant) {
+    const today = new Date().toISOString().slice(0, 10);
+    await supabase
+      .from('tenants')
+      .update({ is_active: false, check_out_date: today, updated_at: new Date().toISOString() })
+      .eq('id', activeTenant.id);
+
+    await supabase.from('tenant_stays').insert({
+      tenant_id: activeTenant.id,
+      tenant_name: activeTenant.name,
+      room_id: existingRoom.id,
+      room_number: existingRoom.room_number,
+      event_type: 'move_out',
+      rental_type: activeTenant.rental_type || 'monthly',
+      rate_amount: existingRoom.monthly_rate,
+      deposit_amount: activeTenant.deposit_amount,
+      start_date: today,
+      end_date: today,
+      status: 'completed',
+      notes: req.body.note || `กำหนดห้อง ${existingRoom.room_number} เป็นห้องว่าง (ย้ายออก)`
+    });
+  }
+
+  const statusThai = normalizedStatus === 'vacant' ? 'ห้องว่าง' : normalizedStatus === 'maintenance' ? 'ซ่อมบำรุง' : 'มีผู้เช่า';
+  await recordLog({
+    action_type: 'ROOM_STATUS_CHANGE',
+    room_id: existingRoom.id,
+    room_number: existingRoom.room_number,
+    tenant_id: activeTenant?.id || null,
+    tenant_name: activeTenant?.name || '',
+    description: `เปลี่ยนสถานะห้อง ${existingRoom.room_number} เป็น "${statusThai}"${req.body.note ? ` (${req.body.note})` : ''}`,
+    metadata: { previous_status: existingRoom.status, new_status: normalizedStatus }
+  });
+
+  res.json(updatedRoom);
+});
+
 app.delete('/api/rooms/:id', async (req, res) => {
   const { id } = req.params;
   const { data: room } = await supabase.from('rooms').select('*').eq('id', id).maybeSingle();
@@ -494,6 +558,130 @@ app.delete('/api/rooms/:id', async (req, res) => {
 });
 
 // 4. Tenants & Tenant Stay History Endpoints
+// Dedicated Tenant-Centric Full-Name Search & History Aggregation
+app.get('/api/tenants/search-history', async (req, res) => {
+  const q = String(req.query.q || '').trim();
+  const tokens = q.toLowerCase().split(/\s+/).filter(Boolean);
+
+  const [
+    { data: allTenants, error: tErr },
+    { data: allStays },
+    { data: allLogs },
+    { data: allInvoices },
+    { data: allAuditLogs }
+  ] = await Promise.all([
+    supabase.from('tenants').select('*').order('is_active', { ascending: false }).order('created_at', { ascending: false }),
+    supabase.from('tenant_stays').select('*').order('start_date', { ascending: false }).order('created_at', { ascending: false }),
+    supabase.from('history_logs').select('*').order('created_at', { ascending: false }).limit(1000),
+    supabase.from('invoices').select('id, invoice_number, tenant_id, tenant_name, room_number, billing_month, billing_year_be, room_rate, water_total, electric_total, other_description, other_amount, total_amount, created_at').order('created_at', { ascending: false }),
+    supabase.from('bill_audit_logs').select('*').order('created_at', { ascending: false }).limit(500)
+  ]);
+
+  if (tErr) return res.status(500).json({ error: tErr.message });
+
+  const matchesTokens = (text) => {
+    if (tokens.length === 0) return true;
+    const hay = String(text || '').toLowerCase();
+    return tokens.every((tk) => hay.includes(tk));
+  };
+
+  const groups = new Map();
+  const ensureGroup = (rawName) => {
+    const clean = String(rawName || '').trim();
+    if (!clean) return null;
+    const key = clean.toLowerCase();
+    if (!groups.has(key)) {
+      groups.set(key, {
+        tenant_name: clean,
+        tenant_records: [],
+        stays: [],
+        history_logs: [],
+        invoices: [],
+        audit_logs: []
+      });
+    }
+    return groups.get(key);
+  };
+
+  const tenantById = {};
+  for (const t of allTenants || []) {
+    if (t.id) tenantById[t.id] = t;
+    if (matchesTokens(t.name)) {
+      const g = ensureGroup(t.name);
+      if (g) g.tenant_records.push(t);
+    }
+  }
+
+  for (const st of allStays || []) {
+    const resolvedName = st.tenant_name || (st.tenant_id ? tenantById[st.tenant_id]?.name : '');
+    if (resolvedName && matchesTokens(resolvedName)) {
+      const g = ensureGroup(resolvedName);
+      if (g) g.stays.push(st);
+    }
+  }
+
+  for (const lg of allLogs || []) {
+    const resolvedName = lg.tenant_name || (lg.tenant_id ? tenantById[lg.tenant_id]?.name : '');
+    if (resolvedName && matchesTokens(resolvedName)) {
+      const g = ensureGroup(resolvedName);
+      if (g) g.history_logs.push(lg);
+    }
+  }
+
+  for (const inv of allInvoices || []) {
+    const resolvedName = inv.tenant_name || (inv.tenant_id ? tenantById[inv.tenant_id]?.name : '');
+    if (resolvedName && matchesTokens(resolvedName)) {
+      const g = ensureGroup(resolvedName);
+      if (g) g.invoices.push(inv);
+    }
+  }
+
+  for (const al of allAuditLogs || []) {
+    if (al.tenant_name && matchesTokens(al.tenant_name)) {
+      const g = ensureGroup(al.tenant_name);
+      if (g) g.audit_logs.push(al);
+    }
+  }
+
+  const results = [...groups.values()]
+    .filter((g) => matchesTokens(g.tenant_name))
+    .map((g) => {
+      const primary = g.tenant_records.find((r) => r.is_active) || g.tenant_records[0] || null;
+      const roomsSet = new Set([
+        ...g.tenant_records.map((r) => r.room_number).filter(Boolean),
+        ...g.stays.map((s) => s.room_number).filter(Boolean),
+        ...g.stays.map((s) => s.previous_room_number).filter(Boolean),
+        ...g.invoices.map((i) => i.room_number).filter(Boolean)
+      ]);
+      const transferCount = g.stays.filter((s) => s.event_type === 'room_transfer').length +
+        g.history_logs.filter((l) => l.action_type === 'ROOM_TRANSFER').length;
+      const totalPaid = g.invoices.reduce((sum, inv) => sum + Number(inv.total_amount || 0), 0);
+      return {
+        tenant_name: g.tenant_name,
+        primary_tenant: primary,
+        tenant_records: g.tenant_records,
+        stays: g.stays,
+        history_logs: g.history_logs,
+        invoices: g.invoices,
+        audit_logs: g.audit_logs,
+        summary: {
+          is_active: Boolean(g.tenant_records.some((r) => r.is_active)),
+          current_room: primary?.room_number || '',
+          rooms_stayed: [...roomsSet],
+          transfer_count: transferCount,
+          invoice_count: g.invoices.length,
+          total_paid: totalPaid
+        }
+      };
+    })
+    .sort((a, b) => {
+      if (a.summary.is_active !== b.summary.is_active) return a.summary.is_active ? -1 : 1;
+      return a.tenant_name.localeCompare(b.tenant_name, 'th');
+    });
+
+  res.json({ query: q, total: results.length, results });
+});
+
 app.get('/api/tenants', async (req, res) => {
   const [{ data: tenants, error }, { data: stays }, { data: invoices }] = await Promise.all([
     supabase.from('tenants').select('*').order('is_active', { ascending: false }).order('room_number', { ascending: true }),
@@ -1378,6 +1566,12 @@ app.get('/api/meter-notes', async (req, res) => {
     const baselineElecPrev = prevSource?.electric_curr || cInv?.electric_prev || r.latest_electric_meter || '';
 
     if (cNote) {
+      const occStatus = cNote.occupancy_status
+        || (cNote.note_status === 'vacant' ? 'vacant'
+          : (r.status === 'vacant' || r.status === 'available' ? 'vacant'
+            : (r.status === 'maintenance' ? 'maintenance' : 'occupied')));
+      const isVacant = occStatus === 'vacant';
+      const isMaintenance = occStatus === 'maintenance';
       const isRecorded =
         cNote.note_status === 'billed' ||
         cNote.note_status === 'recorded' ||
@@ -1396,6 +1590,9 @@ app.get('/api/meter-notes', async (req, res) => {
         zone_sort_order: zoneOrderMap[r.zone] ?? 99,
         sort_order: r.sort_order,
         room_status: r.status,
+        occupancy_status: occStatus,
+        is_vacant: isVacant,
+        is_maintenance: isMaintenance,
         rental_type: r.rental_type,
         has_saved_note: isRecorded,
         is_recorded: isRecorded,
@@ -1412,12 +1609,17 @@ app.get('/api/meter-notes', async (req, res) => {
     }
 
     // If not in monthly_meter_notes yet, build ready-to-record item
+    const occStatus = (r.status === 'vacant' || r.status === 'available')
+      ? 'vacant'
+      : (r.status === 'maintenance' ? 'maintenance' : 'occupied');
+    const isVacant = occStatus === 'vacant' && !cInv;
+    const isMaintenance = occStatus === 'maintenance' && !cInv;
     const occ = activeTenant?.occupant_count || 1;
     const wCalc = r.water_calc_type || 'meter';
     const wRate = Number(r.water_rate || 10);
     const eRate = Number(r.electric_rate || 8);
-    const wTotal = wCalc === 'per_person' ? occ * 100 : (wCalc === 'flat' ? Number(r.water_flat_amount || 100) : 0);
-    const roomRate = Number(r.monthly_rate || 2500);
+    const wTotal = isVacant ? 0 : (wCalc === 'per_person' ? occ * 100 : (wCalc === 'flat' ? Number(r.water_flat_amount || 100) : 0));
+    const roomRate = isVacant ? 0 : Number(r.monthly_rate || 2500);
     const isRecorded = Boolean(cInv);
 
     const draftObj = {
@@ -1429,9 +1631,12 @@ app.get('/api/meter-notes', async (req, res) => {
       zone_sort_order: zoneOrderMap[r.zone] ?? 99,
       sort_order: r.sort_order,
       room_status: r.status,
+      occupancy_status: cInv ? 'occupied' : occStatus,
+      is_vacant: isVacant,
+      is_maintenance: isMaintenance,
       rental_type: r.rental_type,
-      tenant_id: activeTenant?.id || null,
-      tenant_name: cInv?.tenant_name || activeTenant?.name || '',
+      tenant_id: isVacant ? null : (activeTenant?.id || null),
+      tenant_name: cInv?.tenant_name || (isVacant ? '' : (activeTenant?.name || '')),
       billing_month: billingMonth,
       billing_month_num: getMonthNumber(billingMonth),
       billing_year_be: billingYearBe,
@@ -1453,7 +1658,7 @@ app.get('/api/meter-notes', async (req, res) => {
       deposit_deduction: cInv ? Number(cInv.deposit_deduction || 0) : 0,
       is_move_out: Boolean(cInv?.is_move_out),
       total_amount: cInv ? Number(cInv.total_amount) : (roomRate + wTotal),
-      note_status: cInv ? 'billed' : 'pending',
+      note_status: cInv ? 'billed' : (isVacant ? 'vacant' : 'pending'),
       admin_correction_reason: '',
       edit_count: 0,
       has_saved_note: isRecorded,
@@ -1476,7 +1681,8 @@ app.get('/api/meter-notes', async (req, res) => {
   const filtered = allItems.filter((item) => {
     if (zoneFilter && item.zone !== zoneFilter) return false;
     if (recordedFilter === 'recorded' && !item.is_recorded) return false;
-    if (recordedFilter === 'unrecorded' && item.is_recorded) return false;
+    if (recordedFilter === 'unrecorded' && (item.is_recorded || item.is_vacant)) return false;
+    if (recordedFilter === 'vacant' && !item.is_vacant) return false;
     if (search) {
       const mRoom = (item.room_number || '').toLowerCase().includes(search);
       const mName = (item.tenant_name || '').toLowerCase().includes(search);
@@ -1486,8 +1692,11 @@ app.get('/api/meter-notes', async (req, res) => {
   });
 
   // Analytics across all rooms for this billing period & next-month projection
+  const vacantCount = allItems.filter((i) => i.is_vacant).length;
+  const maintenanceCount = allItems.filter((i) => i.is_maintenance).length;
+  const activeRoomsCount = allItems.length - vacantCount;
   const recordedCount = allItems.filter((i) => i.is_recorded).length;
-  const pendingCount = allItems.length - recordedCount;
+  const pendingCount = allItems.filter((i) => !i.is_recorded && !i.is_vacant).length;
   const totalProjectedRevenue = allItems.reduce((s, i) => s + Number(i.total_amount || 0), 0);
   const recordedRevenue = allItems.filter((i) => i.is_recorded).reduce((s, i) => s + Number(i.total_amount || 0), 0);
   const totalElectricUnits = allItems.reduce((s, i) => s + Number(i.electric_units || 0), 0);
@@ -1527,10 +1736,13 @@ app.get('/api/meter-notes', async (req, res) => {
     zones: zones || [],
     summary: {
       total_rooms: allItems.length,
+      active_rooms_count: activeRoomsCount,
+      vacant_count: vacantCount,
+      maintenance_count: maintenanceCount,
       recorded_count: recordedCount,
       pending_count: pendingCount,
       unrecorded_count: pendingCount,
-      completion_pct: allItems.length > 0 ? Math.round((recordedCount / allItems.length) * 100) : 0,
+      completion_pct: activeRoomsCount > 0 ? Math.round((recordedCount / activeRoomsCount) * 100) : (allItems.length > 0 ? 100 : 0),
       total_projected_revenue: totalProjectedRevenue,
       recorded_revenue: recordedRevenue,
       total_electric_units: totalElectricUnits,
@@ -1588,7 +1800,12 @@ app.post('/api/meter-notes', async (req, res) => {
   const eRate = Number(b.electric_unit_price ?? 8);
   const eTotal = eUnits * eRate;
 
-  const roomRate = Number(b.room_rate ?? 2500);
+  const occupancyStatus = (b.occupancy_status === 'vacant' || b.note_status === 'vacant')
+    ? 'vacant'
+    : (b.occupancy_status === 'maintenance' ? 'maintenance' : 'occupied');
+  const isVacantMonth = occupancyStatus === 'vacant';
+
+  const roomRate = Number(b.room_rate ?? (isVacantMonth ? 0 : 2500));
   const otherAmt = Number(b.other_amount ?? 0);
   const depDeduct = Number(b.deposit_deduction ?? 0);
   const totalAmount = roomRate + wTotal + eTotal + otherAmt - depDeduct;
@@ -1631,7 +1848,8 @@ app.post('/api/meter-notes', async (req, res) => {
     deposit_deduction: depDeduct,
     is_move_out: Boolean(b.is_move_out),
     total_amount: totalAmount,
-    note_status: b.note_status === 'pending' ? 'pending' : (b.save_as_draft ? 'draft' : (b.sync_to_invoice !== false ? 'billed' : 'recorded')),
+    occupancy_status: occupancyStatus,
+    note_status: isVacantMonth ? 'vacant' : (b.note_status === 'pending' ? 'pending' : (b.save_as_draft ? 'draft' : (b.sync_to_invoice !== false ? 'billed' : 'recorded'))),
     admin_correction_reason: b.admin_correction_reason || existingNote?.admin_correction_reason || '',
     edit_count: (existingNote?.edit_count || 0) + (isRetroactiveCorrection ? 1 : 0),
     last_edited_at: new Date().toISOString(),
@@ -1659,9 +1877,16 @@ app.post('/api/meter-notes', async (req, res) => {
     savedNote = data;
   }
 
-  // Sync to invoices table so receipts & dashboard reflect the note / retroactive fix immediately
+  if (b.also_update_room_status && savedNote.room_id) {
+    await supabase
+      .from('rooms')
+      .update({ status: occupancyStatus, updated_at: new Date().toISOString() })
+      .eq('id', savedNote.room_id);
+  }
+
+  // Sync to invoices table so receipts & dashboard reflect the note / retroactive fix immediately (skip auto-invoice for vacant rooms)
   let savedInvoice = null;
-  if (b.sync_to_invoice !== false) {
+  if (b.sync_to_invoice !== false && !isVacantMonth) {
     const { data: settings } = await supabase.from('payment_settings').select('*').limit(1).maybeSingle();
     const { data: existingInv } = await supabase
       .from('invoices')
@@ -1855,20 +2080,22 @@ app.post('/api/meter-notes/prepare-next-month', async (req, res) => {
     const sn = sNoteMap[r.room_number];
     const si = sInvMap[r.room_number];
 
+    const isVacantRoom = r.status === 'vacant' || r.status === 'available';
+    const occStatus = isVacantRoom ? 'vacant' : (r.status === 'maintenance' ? 'maintenance' : 'occupied');
     const waterPrev = sn?.water_curr || si?.water_curr || r.latest_water_meter || '';
     const elecPrev = sn?.electric_curr || si?.electric_curr || r.latest_electric_meter || '';
     const occ = activeTenant?.occupant_count || 1;
     const wCalc = r.water_calc_type || 'meter';
-    const wTotal = wCalc === 'per_person' ? occ * 100 : (wCalc === 'flat' ? Number(r.water_flat_amount || 100) : 0);
-    const roomRate = Number(r.monthly_rate || 2500);
+    const wTotal = isVacantRoom ? 0 : (wCalc === 'per_person' ? occ * 100 : (wCalc === 'flat' ? Number(r.water_flat_amount || 100) : 0));
+    const roomRate = isVacantRoom ? 0 : Number(r.monthly_rate || 2500);
 
     const payload = {
       room_id: r.id,
       room_number: r.room_number,
       zone: r.zone,
       sort_order: r.sort_order,
-      tenant_id: activeTenant?.id || null,
-      tenant_name: activeTenant?.name || '',
+      tenant_id: isVacantRoom ? null : (activeTenant?.id || null),
+      tenant_name: isVacantRoom ? '' : (activeTenant?.name || ''),
       billing_month: nextPeriod.month,
       billing_month_num: nextPeriod.month_num,
       billing_year_be: nextPeriod.year_be,
@@ -1890,8 +2117,11 @@ app.post('/api/meter-notes/prepare-next-month', async (req, res) => {
       deposit_deduction: 0,
       is_move_out: false,
       total_amount: roomRate + wTotal,
-      note_status: 'pending',
-      notes: `ดึงเลขมิเตอร์ตั้งต้นจากเดือน ${sourcePeriod.month} ${sourcePeriod.year_be}`
+      occupancy_status: occStatus,
+      note_status: isVacantRoom ? 'vacant' : 'pending',
+      notes: isVacantRoom
+        ? `ห้องว่าง — เตรียมรอบบิลจาก ${sourcePeriod.month} ${sourcePeriod.year_be}`
+        : `ดึงเลขมิเตอร์ตั้งต้นจากเดือน ${sourcePeriod.month} ${sourcePeriod.year_be}`
     };
 
     const { error } = await supabase
