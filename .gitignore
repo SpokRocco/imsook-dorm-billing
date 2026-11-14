@@ -19,3 +19,5 @@ extracted_media/
 # OS & logs
 .DS_Store
 *.log
+
+vercel-env-import.txt

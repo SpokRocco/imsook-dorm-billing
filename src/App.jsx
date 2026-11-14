@@ -83,15 +83,81 @@ export default function App() {
   }, [refreshAll]);
 
   const tabs = [
-    { id: 'notebook', label: 'จดบิลไอคอนห้อง', short: 'จดบิล', icon: Home },
-    { id: 'monthly_report', label: 'รีพอร์ต A4 & PDF', short: 'รีพอร์ต/PDF', icon: FileSpreadsheet },
-    { id: 'daily', label: 'รายวัน / ฟอร์มเปล่า', short: 'รายวัน', icon: Receipt },
-    { id: 'zones_rooms', label: 'โซน & ห้องพัก/ผู้เช่า', short: 'โซน/ห้อง', icon: MapPin },
-    { id: 'dashboard', label: 'แดชบอร์ดผู้บริหาร A4', short: 'แดชบอร์ด', icon: BarChart3 },
-    { id: 'accounting', label: 'บัญชีรายรับ-รายจ่าย', short: 'บัญชี', icon: Wallet },
-    { id: 'logs', label: 'ล็อกเอเจนต์ & ประวัติ', short: 'ล็อกบิล', icon: Bot },
-    { id: 'settings', label: 'ตั้งค่าหอพัก & QR', short: 'ตั้งค่า', icon: Settings }
+    {
+      id: 'notebook',
+      label: 'จดบิลไอคอนห้อง',
+      short: 'จดบิล',
+      icon: Home,
+      gradient: 'from-[#0066EE] to-indigo-600',
+      iconBg: 'bg-blue-100 text-[#0066EE]',
+      desc: 'กรอกมิเตอร์รายเดือน'
+    },
+    {
+      id: 'monthly_report',
+      label: 'รีพอร์ต A4 & PDF',
+      short: 'รีพอร์ต/PDF',
+      icon: FileSpreadsheet,
+      gradient: 'from-violet-600 to-purple-600',
+      iconBg: 'bg-violet-100 text-violet-600',
+      desc: 'สรุปตาราง & ครึ่ง A4'
+    },
+    {
+      id: 'daily',
+      label: 'รายวัน / ฟอร์มเปล่า',
+      short: 'รายวัน',
+      icon: Receipt,
+      gradient: 'from-sky-500 to-cyan-600',
+      iconBg: 'bg-sky-100 text-sky-600',
+      desc: 'บิลรายวัน & กำหนดเอง'
+    },
+    {
+      id: 'zones_rooms',
+      label: 'โซน & ห้องพัก/ผู้เช่า',
+      short: 'โซน/ห้อง',
+      icon: MapPin,
+      gradient: 'from-amber-500 to-orange-500',
+      iconBg: 'bg-amber-100 text-amber-600',
+      desc: 'จัดการโซน & ประวัติ'
+    },
+    {
+      id: 'dashboard',
+      label: 'แดชบอร์ดผู้บริหาร A4',
+      short: 'แดชบอร์ด',
+      icon: BarChart3,
+      gradient: 'from-emerald-500 to-teal-600',
+      iconBg: 'bg-emerald-100 text-emerald-600',
+      desc: 'อินโฟกราฟิกรายเดือน'
+    },
+    {
+      id: 'accounting',
+      label: 'บัญชีรายรับ-รายจ่าย',
+      short: 'บัญชี',
+      icon: Wallet,
+      gradient: 'from-rose-500 to-pink-600',
+      iconBg: 'bg-rose-100 text-rose-600',
+      desc: 'ซ่อมบำรุง & งบกำไร'
+    },
+    {
+      id: 'logs',
+      label: 'ล็อกเอเจนต์ & ประวัติ',
+      short: 'ล็อกบิล',
+      icon: Bot,
+      gradient: 'from-indigo-600 to-blue-700',
+      iconBg: 'bg-indigo-100 text-indigo-600',
+      desc: 'สมการบิลรายห้อง'
+    },
+    {
+      id: 'settings',
+      label: 'ตั้งค่าหอพัก & QR',
+      short: 'ตั้งค่า',
+      icon: Settings,
+      gradient: 'from-teal-500 to-emerald-600',
+      iconBg: 'bg-teal-100 text-teal-600',
+      desc: 'ชื่อหอพัก & บัญชีโอน'
+    }
   ];
+
+  const activeTabMeta = tabs.find((t) => t.id === activeTab) || tabs[0];
 
   const handleSelectTab = (tabId) => {
     setActiveTab(tabId);
@@ -100,105 +166,170 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-100/80 text-slate-900 pb-24 lg:pb-10">
-      {/* Top Sticky Glass Header */}
-      <header className="no-print sticky top-0 z-40 bg-slate-900/95 backdrop-blur-md text-white border-b border-slate-800 shadow-lg">
-        <div className="max-w-7xl mx-auto px-3 sm:px-6 h-16 flex items-center justify-between gap-3">
-          {/* Brand Logo & Dorm Name */}
+    <div className="min-h-screen bg-[#F3F6FC] text-slate-900 pb-24 lg:pb-8 flex">
+      {/* Desktop Colorful Left Sidebar Navigation */}
+      <aside className="no-print hidden lg:flex lg:flex-col lg:w-72 shrink-0 sticky top-0 h-screen bg-white border-r border-slate-200/80 shadow-[6px_0_32px_-12px_rgba(37,99,235,0.12)] z-40">
+        {/* Sidebar Brand Card */}
+        <div className="p-4 border-b border-slate-100">
           <div
             onClick={() => handleSelectTab('notebook')}
-            className="flex items-center gap-3 cursor-pointer min-w-0"
+            className="rounded-3xl bg-gradient-to-br from-[#0066EE] via-indigo-600 to-violet-600 p-4 text-white shadow-lg shadow-blue-500/25 cursor-pointer transition hover:scale-[1.01]"
           >
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-emerald-400 to-teal-600 flex items-center justify-center text-slate-950 font-black shadow-md shrink-0">
-              <Home className="w-5 h-5" />
-            </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="text-base sm:text-lg font-extrabold tracking-tight truncate">
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-2xl bg-white/20 backdrop-blur-sm border border-white/30 flex items-center justify-center shrink-0">
+                <Home className="w-6 h-6 text-white" />
+              </div>
+              <div className="min-w-0">
+                <div className="text-base font-extrabold tracking-tight truncate">
                   {settings?.dorm_name || 'หอพักอิ่มสุข'}
-                </span>
-                <span className="hidden sm:inline-block text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 px-2 py-0.5 rounded-full">
-                  {zones.length} โซน • {rooms.length} ห้อง
-                </span>
-              </div>
-              <div className="text-[11px] text-slate-400 truncate">
-                Smart Dormitory Billing • React + Node.js + Supabase
+                </div>
+                <div className="text-[11px] text-blue-100 font-semibold mt-0.5">
+                  {zones.length} โซน • {rooms.length} ห้องพัก
+                </div>
               </div>
             </div>
-          </div>
-
-          {/* Mobile Drawer Trigger */}
-          <button
-            onClick={() => setMobileMenuOpen((v) => !v)}
-            className="lg:hidden p-2.5 rounded-xl bg-slate-800 border border-slate-700 text-slate-200 cursor-pointer"
-            aria-label="เมนูทั้งหมด"
-          >
-            {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-          </button>
-
-          {/* Desktop Quick Settings / Period Pill */}
-          <div className="hidden lg:flex items-center gap-2 text-xs">
-            <span className="bg-slate-800 border border-slate-700 px-3 py-1.5 rounded-xl text-slate-300">
-              งวดจดมิเตอร์: <strong className="text-emerald-400">{billingMonth} {billingYearBe}</strong>
-            </span>
-            <button
-              onClick={() => handleSelectTab('settings')}
-              className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold px-3.5 py-1.5 rounded-xl cursor-pointer transition"
-            >
-              ✏️ แก้ไขชื่อหอพัก / QR
-            </button>
+            <div className="mt-3 pt-2.5 border-t border-white/20 flex items-center justify-between text-[11px] text-blue-50">
+              <span>Smart Dormitory</span>
+              <span className="px-2 py-0.5 rounded-full bg-white/20 font-bold">Supabase Sync</span>
+            </div>
           </div>
         </div>
 
-        {/* Desktop Sub-Navigation Pills */}
-        <nav className="hidden lg:block bg-slate-950/60 border-t border-slate-800/80">
-          <div className="max-w-7xl mx-auto px-6 py-2 flex items-center gap-1.5 overflow-x-auto custom-scrollbar">
-            {tabs.map((tab) => {
-              const Icon = tab.icon;
-              const active = activeTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => handleSelectTab(tab.id)}
-                  className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap cursor-pointer flex items-center gap-1.5 transition ${
-                    active
-                      ? 'bg-emerald-500 text-slate-950 shadow'
-                      : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+        {/* Sidebar Menu Items */}
+        <nav className="flex-1 overflow-y-auto px-3 py-3 space-y-1.5 custom-scrollbar">
+          <div className="px-2 pb-1 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+            เมนูหลักระบบหอพัก
+          </div>
+          {tabs.map((tab) => {
+            const Icon = tab.icon;
+            const active = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => handleSelectTab(tab.id)}
+                className={`w-full px-3 py-2.5 rounded-2xl text-left cursor-pointer flex items-center gap-3 transition-all duration-200 ${
+                  active
+                    ? `bg-gradient-to-r ${tab.gradient} text-white shadow-md shadow-blue-500/15 scale-[1.01]`
+                    : 'text-slate-700 hover:bg-slate-100/90'
+                }`}
+              >
+                <div
+                  className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 transition ${
+                    active ? 'bg-white/20 text-white' : tab.iconBg
                   }`}
                 >
-                  <Icon className="w-3.5 h-3.5" />
-                  <span>{tab.label}</span>
-                </button>
-              );
-            })}
-          </div>
+                  <Icon className="w-4 h-4" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-extrabold truncate">{tab.label}</div>
+                  <div className={`text-[10px] truncate ${active ? 'text-white/80' : 'text-slate-400'}`}>
+                    {tab.desc}
+                  </div>
+                </div>
+              </button>
+            );
+          })}
         </nav>
 
-        {/* Mobile Slide-Down Drawer */}
-        {mobileMenuOpen && (
-          <div className="lg:hidden bg-slate-900 border-t border-slate-800 px-3 py-3 grid grid-cols-2 gap-2">
-            {tabs.map((tab) => {
-              const Icon = tab.icon;
-              const active = activeTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => handleSelectTab(tab.id)}
-                  className={`px-3 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 cursor-pointer text-left ${
-                    active ? 'bg-emerald-500 text-slate-950' : 'bg-slate-800/70 text-slate-200'
-                  }`}
-                >
-                  <Icon className="w-4 h-4 shrink-0" />
-                  <span className="truncate">{tab.label}</span>
-                </button>
-              );
-            })}
+        {/* Sidebar Bottom Period & Quick Settings */}
+        <div className="p-3.5 border-t border-slate-100 bg-slate-50/70 space-y-2">
+          <div className="rounded-2xl bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200/70 px-3 py-2.5 flex items-center justify-between text-xs">
+            <span className="text-slate-600 font-semibold">งวดจดมิเตอร์</span>
+            <strong className="text-[#0066EE] font-extrabold">{billingMonth} {billingYearBe}</strong>
           </div>
-        )}
-      </header>
+          <button
+            onClick={() => handleSelectTab('settings')}
+            className="w-full bg-white hover:bg-blue-50 text-slate-800 border border-slate-200 font-extrabold px-3 py-2 rounded-2xl text-xs cursor-pointer transition flex items-center justify-center gap-1.5 shadow-xs"
+          >
+            <span>✏️ แก้ไขชื่อหอพัก / QR</span>
+          </button>
+        </div>
+      </aside>
 
-      {/* Main Content Container */}
-      <main className="max-w-7xl mx-auto px-3 sm:px-6 pt-4 sm:pt-6">
+      {/* Right Main Workspace */}
+      <div className="flex-1 min-w-0 flex flex-col">
+        {/* Clean Bright Top Header (Mobile Brand + Desktop Context Bar) */}
+        <header className="no-print sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-slate-200/80 shadow-xs">
+          <div className="max-w-7xl mx-auto px-3 sm:px-6 h-16 flex items-center justify-between gap-3">
+            {/* Mobile Brand */}
+            <div
+              onClick={() => handleSelectTab('notebook')}
+              className="flex lg:hidden items-center gap-2.5 cursor-pointer min-w-0"
+            >
+              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#0066EE] to-indigo-600 flex items-center justify-center text-white shadow-md shrink-0">
+                <Home className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <div className="text-base font-black text-[#0066EE] tracking-tight truncate">
+                  {settings?.dorm_name || 'หอพักอิ่มสุข'}
+                </div>
+                <div className="text-[11px] font-bold text-slate-500 truncate">
+                  {zones.length} โซน • {rooms.length} ห้อง • {billingMonth} {billingYearBe}
+                </div>
+              </div>
+            </div>
+
+            {/* Desktop Current Section Title */}
+            <div className="hidden lg:flex items-center gap-3 min-w-0">
+              <div className={`w-10 h-10 rounded-2xl bg-gradient-to-br ${activeTabMeta.gradient} text-white flex items-center justify-center shadow-sm shrink-0`}>
+                <activeTabMeta.icon className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <h1 className="text-lg font-extrabold text-slate-900 truncate">{activeTabMeta.label}</h1>
+                <p className="text-xs text-slate-500 truncate">{activeTabMeta.desc} • {settings?.dorm_name || 'หอพักอิ่มสุข'}</p>
+              </div>
+            </div>
+
+            {/* Right Controls */}
+            <div className="flex items-center gap-2">
+              <span className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-blue-50 text-[#0066EE] border border-blue-200 text-xs font-extrabold">
+                งวด: {billingMonth} {billingYearBe}
+              </span>
+              <button
+                onClick={() => handleSelectTab('settings')}
+                className="hidden sm:inline-flex lg:hidden bg-amber-100 text-amber-800 font-bold px-3 py-1.5 rounded-full text-xs cursor-pointer"
+              >
+                ตั้งค่า/QR
+              </button>
+              <button
+                onClick={() => setMobileMenuOpen((v) => !v)}
+                className="lg:hidden p-2.5 rounded-2xl bg-blue-50 border border-blue-200 text-[#0066EE] cursor-pointer"
+                aria-label="เมนูทั้งหมด"
+              >
+                {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+              </button>
+            </div>
+          </div>
+
+          {/* Mobile Slide-Down Colorful Menu Drawer */}
+          {mobileMenuOpen && (
+            <div className="lg:hidden bg-white border-t border-slate-200 px-3 py-3 grid grid-cols-2 gap-2 shadow-xl">
+              {tabs.map((tab) => {
+                const Icon = tab.icon;
+                const active = activeTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => handleSelectTab(tab.id)}
+                    className={`px-3 py-2.5 rounded-2xl text-xs font-bold flex items-center gap-2 cursor-pointer text-left transition ${
+                      active
+                        ? `bg-gradient-to-r ${tab.gradient} text-white shadow-md`
+                        : 'bg-slate-50 text-slate-700 border border-slate-200'
+                    }`}
+                  >
+                    <div className={`w-7 h-7 rounded-xl flex items-center justify-center shrink-0 ${active ? 'bg-white/20 text-white' : tab.iconBg}`}>
+                      <Icon className="w-4 h-4" />
+                    </div>
+                    <span className="truncate">{tab.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </header>
+
+        {/* Main Content Container */}
+        <main className="max-w-7xl w-full mx-auto px-3 sm:px-6 pt-4 sm:pt-6">
         {activeTab === 'notebook' && (
           <MonthlyRoomIconsView
             settings={settings}
@@ -296,19 +427,20 @@ export default function App() {
             showToast={showToast}
           />
         )}
-      </main>
+        </main>
+      </div>
 
-      {/* Mobile Bottom Navigation Dock (Smart Device Friendly) */}
-      <nav className="no-print lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 px-2 py-1.5 flex items-center justify-around shadow-[0_-4px_20px_rgba(0,0,0,0.08)]">
-        {[tabs[0], tabs[1], tabs[3], tabs[6], tabs[7]].map((tab) => {
+      {/* Mobile Curved Electric-Blue Bottom Navigation Dock (Inspired by Reference App) */}
+      <nav className="no-print lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-gradient-to-r from-[#0066EE] via-[#1D6FF2] to-[#3B82F6] text-white rounded-t-[26px] px-2 py-2 flex items-center justify-around shadow-[0_-8px_30px_rgba(0,102,238,0.28)]">
+        {[tabs[0], tabs[1], tabs[3], tabs[4], tabs[7]].map((tab) => {
           const Icon = tab.icon;
           const active = activeTab === tab.id;
           return (
             <button
               key={tab.id}
               onClick={() => handleSelectTab(tab.id)}
-              className={`flex flex-col items-center justify-center py-1 px-2.5 rounded-xl min-w-[58px] cursor-pointer transition ${
-                active ? 'text-emerald-700 bg-emerald-50 font-extrabold' : 'text-slate-500 font-semibold'
+              className={`flex flex-col items-center justify-center py-1.5 px-2.5 rounded-2xl min-w-[60px] cursor-pointer transition ${
+                active ? 'bg-white text-[#0066EE] font-extrabold shadow-md' : 'text-blue-100 hover:text-white font-semibold'
               }`}
             >
               <Icon className="w-5 h-5" />
