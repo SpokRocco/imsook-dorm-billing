@@ -2046,6 +2046,71 @@ app.post('/api/meter-notes', async (req, res) => {
   });
 });
 
+// Clear Monthly Recording for a Specific Room (Resets to 'unrecorded/pending' while preserving tenant, rates & history)
+app.post('/api/meter-notes/clear', async (req, res) => {
+  const roomNumber = String(req.body.room_number || '').trim();
+  const billingMonth = String(req.body.billing_month || '').trim();
+  const billingYearBe = Number(req.body.billing_year_be || 2569);
+
+  if (!roomNumber || !billingMonth) {
+    return res.status(400).json({ error: 'กรุณาระบุห้องและเดือนที่ต้องการเคลียร์ค่า' });
+  }
+
+  const prevPeriod = getPrevMonthAndYear(billingMonth, billingYearBe);
+  const [{ data: room }, { data: prevNote }, { data: prevInv }, { data: activeTenant }] = await Promise.all([
+    supabase.from('rooms').select('*').eq('room_number', roomNumber).maybeSingle(),
+    supabase.from('monthly_meter_notes').select('water_curr, electric_curr').eq('room_number', roomNumber).eq('billing_month', prevPeriod.month).eq('billing_year_be', prevPeriod.year_be).maybeSingle(),
+    supabase.from('invoices').select('water_curr, electric_curr').eq('room_number', roomNumber).eq('billing_month', prevPeriod.month).eq('billing_year_be', prevPeriod.year_be).maybeSingle(),
+    supabase.from('tenants').select('id, name').eq('room_number', roomNumber).eq('is_active', true).maybeSingle()
+  ]);
+
+  // 1. Delete this month's meter note & monthly invoice (leaves all other months & history intact)
+  const [{ error: delNoteErr }, { error: delInvErr }] = await Promise.all([
+    supabase
+      .from('monthly_meter_notes')
+      .delete()
+      .eq('room_number', roomNumber)
+      .eq('billing_month', billingMonth)
+      .eq('billing_year_be', billingYearBe),
+    supabase
+      .from('invoices')
+      .delete()
+      .eq('room_number', roomNumber)
+      .eq('billing_month', billingMonth)
+      .eq('billing_year_be', billingYearBe)
+      .eq('invoice_type', 'monthly')
+  ]);
+
+  if (delNoteErr) return res.status(500).json({ error: delNoteErr.message });
+  if (delInvErr) return res.status(500).json({ error: delInvErr.message });
+
+  // 2. Restore room latest meters to previous month's ending meter (if available) and keep room status occupied if requested
+  if (room?.id) {
+    const restoredWater = prevNote?.water_curr || prevInv?.water_curr || room.latest_water_meter || '';
+    const restoredElec = prevNote?.electric_curr || prevInv?.electric_curr || room.latest_electric_meter || '';
+    const roomPatch = {
+      latest_water_meter: String(restoredWater),
+      latest_electric_meter: String(restoredElec),
+      updated_at: new Date().toISOString()
+    };
+    if (req.body.reset_room_status_to_occupied && (room.status === 'vacant' || room.status === 'available')) {
+      roomPatch.status = 'occupied';
+    }
+    await supabase.from('rooms').update(roomPatch).eq('id', room.id);
+  }
+
+  await recordLog({
+    action_type: 'CLEAR_MONTHLY_NOTE',
+    room_id: room?.id || null,
+    room_number: roomNumber,
+    tenant_id: activeTenant?.id || null,
+    tenant_name: activeTenant?.name || '',
+    description: `เคลียร์ค่าบันทึกบิลเดือน ${billingMonth} ${billingYearBe} ห้อง ${roomNumber} (กลับเป็นสถานะยังไม่บันทึก คงข้อมูลผู้เช่าและอัตราเรทเดิม)`
+  });
+
+  res.json({ success: true, room_number: roomNumber, billing_month: billingMonth, billing_year_be: billingYearBe });
+});
+
 // Initialize / Carry-over Meter Notes for Next Billing Month Automatically
 app.post('/api/meter-notes/prepare-next-month', async (req, res) => {
   const { from_month, from_year_be, target_month, target_year_be } = req.body;

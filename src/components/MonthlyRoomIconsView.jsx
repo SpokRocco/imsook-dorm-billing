@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Home, DoorOpen, CheckCircle2, Clock, AlertTriangle, Search, Sparkles,
   Building2, Layers, MapPin, ChevronLeft, ChevronRight, X, Calculator,
-  History, SlidersHorizontal, ArrowUpRight, ArrowDownRight, Minus, Plus, Save, RefreshCw
+  History, SlidersHorizontal, ArrowUpRight, ArrowDownRight, Minus, Plus, Save, RefreshCw, RotateCcw
 } from 'lucide-react';
 import { THAI_MONTHS, formatCurrency, toThaiBahtText } from '../utils/bahtText.js';
 
@@ -286,6 +286,58 @@ export default function MonthlyRoomIconsView({
       } else {
         setActiveRoomDraft(null);
       }
+    } catch (err) {
+      if (showToast) showToast(err.message, 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleClearRoomNote = async (roomObj, keepPopupOpen = false) => {
+    if (!roomObj?.room_number) return;
+    const confirmed = window.confirm(
+      `ต้องการเคลียร์ค่าการบันทึกเดือน ${billingMonth} ${billingYearBe} ของห้อง ${roomObj.room_number} ให้กลับเป็น "ยังไม่ได้บันทึก" ใช่หรือไม่?\n\n(ข้อมูลผู้เช่า ค่าน้ำ-ค่าไฟ อัตราเรท และเลขมิเตอร์ตั้งต้นจากฐานข้อมูลยังคงอยู่ครบ)`
+    );
+    if (!confirmed) return;
+
+    setSaving(true);
+    try {
+      const res = await fetch('/api/meter-notes/clear', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          room_number: roomObj.room_number,
+          billing_month: billingMonth,
+          billing_year_be: billingYearBe,
+          reset_room_status_to_occupied: true
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'เคลียร์ค่าไม่สำเร็จ');
+
+      if (showToast) {
+        showToast(`เคลียร์ค่าบันทึกห้อง ${roomObj.room_number} เดือน ${billingMonth} แล้ว (กลับเป็นสถานะยังไม่บันทึก)`);
+      }
+
+      const freshRes = await fetch(
+        `/api/meter-notes?billing_month=${encodeURIComponent(billingMonth)}&billing_year_be=${billingYearBe}&page=1&page_size=200`
+      );
+      const freshData = await freshRes.json();
+      if (freshRes.ok) {
+        setNotebookData(freshData);
+        if (keepPopupOpen) {
+          const freshItem = (freshData.all_rooms_items || freshData.items || []).find(
+            (i) => i.room_number === roomObj.room_number
+          );
+          if (freshItem) openRoomPopup(freshItem);
+          else setActiveRoomDraft(null);
+        }
+      } else {
+        await fetchRoomsData();
+        if (keepPopupOpen) setActiveRoomDraft(null);
+      }
+
+      if (onSyncSuccess) onSyncSuccess();
     } catch (err) {
       if (showToast) showToast(err.message, 'error');
     } finally {
@@ -702,9 +754,17 @@ export default function MonthlyRoomIconsView({
                         Number(room.electric_units) > 250);
 
                     return (
-                      <button
+                      <div
                         key={room.room_number}
+                        role="button"
+                        tabIndex={0}
                         onClick={() => openRoomPopup(room)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            openRoomPopup(room);
+                          }
+                        }}
                         className={`group text-left rounded-3xl bg-white border-2 transition-all duration-200 cursor-pointer flex flex-col justify-between min-h-[164px] relative overflow-hidden active:scale-[0.98] shadow-[0_6px_20px_-8px_rgba(37,99,235,0.14)] hover:shadow-xl hover:-translate-y-1 ${
                           isVacant
                             ? 'border-cyan-300 hover:border-cyan-500 bg-cyan-50/20'
@@ -777,6 +837,20 @@ export default function MonthlyRoomIconsView({
                                   ตรวจเลข!
                                 </span>
                               )}
+                              {(isRec || isVacant) && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleClearRoomNote(room, false);
+                                  }}
+                                  title="เคลียร์ค่าบันทึกเดือนนี้ (กลับเป็นยังไม่บันทึก)"
+                                  className="inline-flex items-center gap-0.5 text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 cursor-pointer"
+                                >
+                                  <RotateCcw className="w-2.5 h-2.5" />
+                                  <span>ล้างค่า</span>
+                                </button>
+                              )}
                             </div>
                           </div>
 
@@ -805,7 +879,7 @@ export default function MonthlyRoomIconsView({
                             </div>
                           </div>
                         </div>
-                      </button>
+                      </div>
                     );
                   })}
                 </div>
@@ -1282,6 +1356,17 @@ export default function MonthlyRoomIconsView({
                   <span>ห้องถัดไป</span>
                   <ChevronRight className="w-4 h-4" />
                 </button>
+                {(activeRoomDraft.is_recorded || activeRoomDraft.is_vacant || activeRoomDraft.id) && (
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={() => handleClearRoomNote(activeRoomDraft, true)}
+                    className="px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 disabled:opacity-60 border border-rose-200 text-xs font-extrabold text-rose-700 cursor-pointer flex items-center gap-1"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>ล้างค่าบันทึกเดือนนี้</span>
+                  </button>
+                )}
               </div>
 
               <div className="flex items-center gap-2 ml-auto">
